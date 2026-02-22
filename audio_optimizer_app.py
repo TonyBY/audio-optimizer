@@ -700,11 +700,18 @@ Temporary files created during processing are deleted automatically the moment p
         if auto_btn and both_uploaded:
             with tempfile.TemporaryDirectory() as _td:
                 _vp = os.path.join(_td, vocal_file.name)
-                _ap = os.path.join(_td, accomp_file.name)
                 with open(_vp, 'wb') as _f:
                     _f.write(vocal_file.getbuffer())
-                with open(_ap, 'wb') as _f:
-                    _f.write(accomp_file.getbuffer())
+
+                # Accompaniment: direct upload or extracted bytes from session state
+                if accomp_file is not None:
+                    _ap = os.path.join(_td, accomp_file.name)
+                    with open(_ap, 'wb') as _f:
+                        _f.write(accomp_file.getbuffer())
+                else:
+                    _ap = os.path.join(_td, st.session_state['extracted_accomp_name'])
+                    with open(_ap, 'wb') as _f:
+                        _f.write(st.session_state['extracted_accomp_bytes'])
 
                 with st.spinner("Analysing tracks…"):
                     v_start = detect_audio_start(_vp)
