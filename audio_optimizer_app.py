@@ -109,6 +109,34 @@ def get_audio_duration(filepath):
     except (ValueError, AttributeError):
         return None
 
+# ── Helper: detect leading-silence end (= first audio event) ─────────────────
+def detect_audio_start(filepath, noise_db=-50, min_silence_s=0.3):
+    """
+    Return the timestamp (seconds) where audio first becomes non-silent.
+
+    Uses ffmpeg silencedetect. If the file has no detectable leading silence
+    (audio starts immediately) returns 0.0.
+
+    noise_db        : threshold below which a signal is considered silent
+    min_silence_s   : minimum duration to count as a silence period
+    """
+    import re
+    cmd = [
+        'ffmpeg', '-i', filepath,
+        '-af', f'silencedetect=noise={noise_db}dB:d={min_silence_s}',
+        '-f', 'null', '-'
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    output = result.stderr  # ffmpeg writes filter output to stderr
+
+    starts = [float(x) for x in re.findall(r'silence_start: ([\d.]+)', output)]
+    ends   = [float(x) for x in re.findall(r'silence_end: ([\d.]+)',   output)]
+
+    # Leading silence exists when the first silence_start is at (or very near) 0
+    if starts and ends and starts[0] < 0.1:
+        return round(ends[0], 3)
+    return 0.0
+
 # ── Helper: download buttons ──────────────────────────────────────────────────
 def create_download_buttons(wav_path, output_stem, temp_dir, key_suffix=""):
     """Copy wav_path to a named file and render WAV + optional MP3 download buttons."""
@@ -343,6 +371,11 @@ def optimize_audio(input_path, output_dir, stage_prefix="opt"):
     return final_wav, stages_info
 
 
+# ── Session-state defaults for auto-sync offset widgets ──────────────────────
+for _key in ('vocal_offset_widget', 'accomp_offset_widget'):
+    if _key not in st.session_state:
+        st.session_state[_key] = 0.0
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tabs
 # ══════════════════════════════════════════════════════════════════════════════
@@ -384,20 +417,73 @@ with tab_mix:
 
         with col_sync:
             st.markdown("**⏱️ Time Synchronization**")
+
+            # ── Auto-detect sync ──────────────────────────────────────────────
+            auto_btn = st.button(
+                "🔍 Auto-detect sync",
+                key="auto_sync_btn",
+                help=(
+                    "Analyse the leading silence in both files and suggest offsets "
+                    "that align their first audio events."
+                )
+            )
+            if auto_btn:
+                with tempfile.TemporaryDirectory() as _td:
+                    _vp = os.path.join(_td, vocal_file.name)
+                    _ap = os.path.join(_td, accomp_file.name)
+                    with open(_vp, 'wb') as _f:
+                        _f.write(vocal_file.getbuffer())
+                    with open(_ap, 'wb') as _f:
+                        _f.write(accomp_file.getbuffer())
+
+                    with st.spinner("Analysing tracks…"):
+                        v_start = detect_audio_start(_vp)
+                        a_start = detect_audio_start(_ap)
+
+                # Align first audio events: delay whichever track starts sooner
+                if v_start > a_start:
+                    # Vocal has more leading silence → delay the accompaniment
+                    # so its audio starts when the vocal audio starts
+                    st.session_state['vocal_offset_widget']  = 0.0
+                    st.session_state['accomp_offset_widget'] = round(v_start - a_start, 2)
+                elif a_start > v_start:
+                    # Accompaniment has more leading silence → delay the vocal
+                    st.session_state['vocal_offset_widget']  = round(a_start - v_start, 2)
+                    st.session_state['accomp_offset_widget'] = 0.0
+                else:
+                    st.session_state['vocal_offset_widget']  = 0.0
+                    st.session_state['accomp_offset_widget'] = 0.0
+
+                # Persist detection result for display after rerun
+                st.session_state['auto_sync_result'] = (v_start, a_start)
+                st.rerun()
+
+            # Show last detection result (survives the rerun)
+            if 'auto_sync_result' in st.session_state:
+                v_s, a_s = st.session_state['auto_sync_result']
+                if v_s == 0.0 and a_s == 0.0:
+                    st.success("Both tracks start with audio immediately — no offset needed.")
+                else:
+                    st.info(
+                        f"Vocal audio starts at **{v_s:.2f}s** · "
+                        f"Accompaniment audio starts at **{a_s:.2f}s** · "
+                        f"Suggested offset applied below."
+                    )
+
             st.caption(
-                "Delay one track so both start at the right moment. "
+                "Adjust manually if needed. "
                 "Only one offset should be non-zero for a typical recording."
             )
             vocal_offset = st.number_input(
                 "Vocal start offset (seconds)",
-                min_value=0.0, max_value=300.0, value=0.0, step=0.1,
-                key="vocal_offset",
+                min_value=0.0, max_value=300.0, step=0.1,
+                key="vocal_offset_widget",
                 help="Delay the vocal by this many seconds. Use when the music starts before the singing."
             )
             accomp_offset = st.number_input(
                 "Accompaniment start offset (seconds)",
-                min_value=0.0, max_value=300.0, value=0.0, step=0.1,
-                key="accomp_offset",
+                min_value=0.0, max_value=300.0, step=0.1,
+                key="accomp_offset_widget",
                 help="Delay the music by this many seconds. Use when the vocal starts before the music."
             )
 
