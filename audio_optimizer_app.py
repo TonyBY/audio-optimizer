@@ -408,125 +408,126 @@ with tab_mix:
             help="The instrumental or backing track that accompanies the vocal"
         )
 
-    if vocal_file and accomp_file:
+    both_uploaded = vocal_file is not None and accomp_file is not None
 
-        # ── Step 2: Sync & Balance ────────────────────────────────────────────
-        st.subheader("Step 2 — Sync & Balance")
+    # ── Step 2: Sync & Balance ────────────────────────────────────────────────
+    st.subheader("Step 2 — Sync & Balance")
 
-        col_sync, col_vol = st.columns(2)
+    col_sync, col_vol = st.columns(2)
 
-        with col_sync:
-            st.markdown("**⏱️ Time Synchronization**")
+    with col_sync:
+        st.markdown("**⏱️ Time Synchronization**")
 
-            # ── Auto-detect sync ──────────────────────────────────────────────
-            auto_btn = st.button(
-                "🔍 Auto-detect sync",
-                key="auto_sync_btn",
-                help=(
-                    "Analyse the leading silence in both files and suggest offsets "
-                    "that align their first audio events."
-                )
+        # Auto-detect sync button — disabled until both files are uploaded
+        auto_btn = st.button(
+            "🔍 Auto-detect sync",
+            key="auto_sync_btn",
+            disabled=not both_uploaded,
+            help=(
+                "Analyse the leading silence in both files and suggest offsets "
+                "that align their first audio events. Upload both tracks first."
             )
-            if auto_btn:
-                with tempfile.TemporaryDirectory() as _td:
-                    _vp = os.path.join(_td, vocal_file.name)
-                    _ap = os.path.join(_td, accomp_file.name)
-                    with open(_vp, 'wb') as _f:
-                        _f.write(vocal_file.getbuffer())
-                    with open(_ap, 'wb') as _f:
-                        _f.write(accomp_file.getbuffer())
-
-                    with st.spinner("Analysing tracks…"):
-                        v_start = detect_audio_start(_vp)
-                        a_start = detect_audio_start(_ap)
-
-                # Align first audio events: delay whichever track starts sooner
-                if v_start > a_start:
-                    # Vocal has more leading silence → delay the accompaniment
-                    # so its audio starts when the vocal audio starts
-                    st.session_state['vocal_offset_widget']  = 0.0
-                    st.session_state['accomp_offset_widget'] = round(v_start - a_start, 2)
-                elif a_start > v_start:
-                    # Accompaniment has more leading silence → delay the vocal
-                    st.session_state['vocal_offset_widget']  = round(a_start - v_start, 2)
-                    st.session_state['accomp_offset_widget'] = 0.0
-                else:
-                    st.session_state['vocal_offset_widget']  = 0.0
-                    st.session_state['accomp_offset_widget'] = 0.0
-
-                # Persist detection result for display after rerun
-                st.session_state['auto_sync_result'] = (v_start, a_start)
-                st.rerun()
-
-            # Show last detection result (survives the rerun)
-            if 'auto_sync_result' in st.session_state:
-                v_s, a_s = st.session_state['auto_sync_result']
-                if v_s == 0.0 and a_s == 0.0:
-                    st.success("Both tracks start with audio immediately — no offset needed.")
-                else:
-                    st.info(
-                        f"Vocal audio starts at **{v_s:.2f}s** · "
-                        f"Accompaniment audio starts at **{a_s:.2f}s** · "
-                        f"Suggested offset applied below."
-                    )
-
-            st.caption(
-                "Adjust manually if needed. "
-                "Only one offset should be non-zero for a typical recording."
-            )
-            vocal_offset = st.number_input(
-                "Vocal start offset (seconds)",
-                min_value=0.0, max_value=300.0, step=0.1,
-                key="vocal_offset_widget",
-                help="Delay the vocal by this many seconds. Use when the music starts before the singing."
-            )
-            accomp_offset = st.number_input(
-                "Accompaniment start offset (seconds)",
-                min_value=0.0, max_value=300.0, step=0.1,
-                key="accomp_offset_widget",
-                help="Delay the music by this many seconds. Use when the vocal starts before the music."
-            )
-
-        with col_vol:
-            st.markdown("**🔊 Volume Balance**")
-            st.caption("Lower the accompaniment so the vocal sits clearly on top.")
-            vocal_vol = st.slider(
-                "Vocal volume (%)",
-                min_value=0, max_value=200, value=100, step=5,
-                key="vocal_vol",
-                help="100% = original level. Values above 100% amplify beyond the original."
-            )
-            accomp_vol = st.slider(
-                "Accompaniment volume (%)",
-                min_value=0, max_value=200, value=80, step=5,
-                key="accomp_vol",
-                help="Try 70–85% so the vocal sits clearly on top of the music."
-            )
-
-        # ── Step 3: Optional optimization ────────────────────────────────────
-        st.subheader("Step 3 — Optional Optimization")
-        apply_optimization = st.checkbox(
-            "Apply vocal optimization to the final mix",
-            value=False,
-            help="Runs EQ, compression, and loudness normalization on the mixed output"
         )
-        if apply_optimization:
-            st.info(
-                f"Optimization will use: **{vocal_profile}** profile · "
-                f"**{target_loudness} LUFS** · reverb: **{reverb}**  "
-                f"_(configure in the sidebar)_"
-            )
+        if auto_btn and both_uploaded:
+            with tempfile.TemporaryDirectory() as _td:
+                _vp = os.path.join(_td, vocal_file.name)
+                _ap = os.path.join(_td, accomp_file.name)
+                with open(_vp, 'wb') as _f:
+                    _f.write(vocal_file.getbuffer())
+                with open(_ap, 'wb') as _f:
+                    _f.write(accomp_file.getbuffer())
 
-        # ── Step 4: Process ───────────────────────────────────────────────────
-        st.subheader("Step 4 — Process & Download")
+                with st.spinner("Analysing tracks…"):
+                    v_start = detect_audio_start(_vp)
+                    a_start = detect_audio_start(_ap)
 
-        col_btn, col_cap = st.columns([1, 3])
-        with col_btn:
-            mix_button = st.button(
-                "▶️ Mix & Export", type="primary",
-                use_container_width=True, key="mix_btn"
-            )
-        with col_cap:
+            if v_start > a_start:
+                st.session_state['vocal_offset_widget']  = 0.0
+                st.session_state['accomp_offset_widget'] = round(v_start - a_start, 2)
+            elif a_start > v_start:
+                st.session_state['vocal_offset_widget']  = round(a_start - v_start, 2)
+                st.session_state['accomp_offset_widget'] = 0.0
+            else:
+                st.session_state['vocal_offset_widget']  = 0.0
+                st.session_state['accomp_offset_widget'] = 0.0
+
+            st.session_state['auto_sync_result'] = (v_start, a_start)
+            st.rerun()
+
+        # Show last detection result (persists across reruns)
+        if 'auto_sync_result' in st.session_state:
+            v_s, a_s = st.session_state['auto_sync_result']
+            if v_s == 0.0 and a_s == 0.0:
+                st.success("Both tracks start with audio immediately — no offset needed.")
+            else:
+                st.info(
+                    f"Vocal audio starts at **{v_s:.2f}s** · "
+                    f"Accompaniment audio starts at **{a_s:.2f}s** · "
+                    f"Suggested offset applied below."
+                )
+
+        st.caption(
+            "Adjust manually if needed. "
+            "Only one offset should be non-zero for a typical recording."
+        )
+        vocal_offset = st.number_input(
+            "Vocal start offset (seconds)",
+            min_value=0.0, max_value=300.0, step=0.1,
+            key="vocal_offset_widget",
+            help="Delay the vocal by this many seconds. Use when the music starts before the singing."
+        )
+        accomp_offset = st.number_input(
+            "Accompaniment start offset (seconds)",
+            min_value=0.0, max_value=300.0, step=0.1,
+            key="accomp_offset_widget",
+            help="Delay the music by this many seconds. Use when the vocal starts before the music."
+        )
+
+    with col_vol:
+        st.markdown("**🔊 Volume Balance**")
+        st.caption("Lower the accompaniment so the vocal sits clearly on top.")
+        vocal_vol = st.slider(
+            "Vocal volume (%)",
+            min_value=0, max_value=200, value=100, step=5,
+            key="vocal_vol",
+            help="100% = original level. Values above 100% amplify beyond the original."
+        )
+        accomp_vol = st.slider(
+            "Accompaniment volume (%)",
+            min_value=0, max_value=200, value=80, step=5,
+            key="accomp_vol",
+            help="Try 70–85% so the vocal sits clearly on top of the music."
+        )
+
+    # ── Step 3: Optional optimization ────────────────────────────────────────
+    st.subheader("Step 3 — Optional Optimization")
+    apply_optimization = st.checkbox(
+        "Apply vocal optimization to the final mix",
+        value=False,
+        help="Runs EQ, compression, and loudness normalization on the mixed output"
+    )
+    if apply_optimization:
+        st.info(
+            f"Optimization will use: **{vocal_profile}** profile · "
+            f"**{target_loudness} LUFS** · reverb: **{reverb}**  "
+            f"_(configure in the sidebar)_"
+        )
+
+    # ── Step 4: Process & Download ────────────────────────────────────────────
+    st.subheader("Step 4 — Process & Download")
+
+    if not both_uploaded:
+        st.warning("⬆️ Upload both a vocal track and an accompaniment track (Step 1) to enable mixing.")
+
+    col_btn, col_cap = st.columns([1, 3])
+    with col_btn:
+        mix_button = st.button(
+            "▶️ Mix & Export", type="primary",
+            use_container_width=True, key="mix_btn",
+            disabled=not both_uploaded
+        )
+    with col_cap:
+        if both_uploaded:
             offset_note = ""
             if vocal_offset > 0:
                 offset_note += f" | Vocal delayed {vocal_offset:.1f}s"
@@ -534,55 +535,49 @@ with tab_mix:
                 offset_note += f" | Accomp delayed {accomp_offset:.1f}s"
             st.caption(f"Vocal {vocal_vol}% · Accomp {accomp_vol}%{offset_note}")
 
-        if mix_button:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Save uploads to temp dir
-                vocal_path  = os.path.join(temp_dir, vocal_file.name)
-                accomp_path = os.path.join(temp_dir, accomp_file.name)
-                with open(vocal_path,  'wb') as f:
-                    f.write(vocal_file.getbuffer())
-                with open(accomp_path, 'wb') as f:
-                    f.write(accomp_file.getbuffer())
+    if mix_button and both_uploaded:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            vocal_path  = os.path.join(temp_dir, vocal_file.name)
+            accomp_path = os.path.join(temp_dir, accomp_file.name)
+            with open(vocal_path,  'wb') as f:
+                f.write(vocal_file.getbuffer())
+            with open(accomp_path, 'wb') as f:
+                f.write(accomp_file.getbuffer())
 
-                st.info("⏳ Processing audio…")
-                start_time = time.time()
+            st.info("⏳ Processing audio…")
+            start_time = time.time()
 
-                mix_result = mix_audio(
-                    vocal_path, accomp_path, temp_dir,
-                    vocal_offset, accomp_offset, vocal_vol, accomp_vol
-                )
+            mix_result = mix_audio(
+                vocal_path, accomp_path, temp_dir,
+                vocal_offset, accomp_offset, vocal_vol, accomp_vol
+            )
 
-                if mix_result is None:
-                    st.error("❌ Mixing failed. See error messages above.")
-                else:
-                    mixed_wav, all_stages = mix_result
-                    final_wav = mixed_wav
+            if mix_result is None:
+                st.error("❌ Mixing failed. See error messages above.")
+            else:
+                mixed_wav, all_stages = mix_result
+                final_wav = mixed_wav
 
-                    if apply_optimization:
-                        opt_result = optimize_audio(mixed_wav, temp_dir, stage_prefix="mix_opt")
-                        if opt_result:
-                            final_wav, opt_stages = opt_result
-                            all_stages += opt_stages
-                        else:
-                            st.warning("⚠️ Optimization failed; downloading un-optimized mix.")
+                if apply_optimization:
+                    opt_result = optimize_audio(mixed_wav, temp_dir, stage_prefix="mix_opt")
+                    if opt_result:
+                        final_wav, opt_stages = opt_result
+                        all_stages += opt_stages
+                    else:
+                        st.warning("⚠️ Optimization failed; downloading un-optimized mix.")
 
-                    elapsed = time.time() - start_time
-                    st.success(f"✅ Done in {elapsed:.1f}s!")
+                elapsed = time.time() - start_time
+                st.success(f"✅ Done in {elapsed:.1f}s!")
 
-                    st.header("📥 Download")
-                    output_stem = f"mixed_{Path(vocal_file.name).stem}"
-                    create_download_buttons(final_wav, output_stem, temp_dir, key_suffix="mix")
+                st.header("📥 Download")
+                output_stem = f"mixed_{Path(vocal_file.name).stem}"
+                create_download_buttons(final_wav, output_stem, temp_dir, key_suffix="mix")
 
-                    with st.expander("📊 Processing Report", expanded=True):
-                        for line in all_stages:
-                            st.text(line)
+                with st.expander("📊 Processing Report", expanded=True):
+                    for line in all_stages:
+                        st.text(line)
 
-                    st.success("🎉 Your mixed audio is ready — click a download button above.")
-
-    elif vocal_file or accomp_file:
-        st.info("👆 Please upload **both** a vocal track and an accompaniment track to continue.")
-    else:
-        st.info("👆 Upload both audio files above to get started.")
+                st.success("🎉 Your mixed audio is ready — click a download button above.")
 
     with st.expander("ℹ️ How Mixing Works"):
         st.markdown("""
