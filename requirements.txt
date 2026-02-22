@@ -1,1 +1,3 @@
 streamlit>=1.30.0
+audio-separator[cpu]>=0.17.0
+yt-dlp>=2024.1.1

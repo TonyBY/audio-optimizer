@@ -16,6 +16,9 @@ import tempfile
 import shutil
 from pathlib import Path
 import time
+import re
+import logging
+import urllib.request
 
 st.set_page_config(
     page_title="Audio Optimizer",
@@ -136,6 +139,143 @@ def detect_audio_start(filepath, noise_db=-50, min_silence_s=0.3):
     if starts and ends and starts[0] < 0.1:
         return round(ends[0], 3)
     return 0.0
+
+# ── Helper: download audio from URL ──────────────────────────────────────────
+def download_audio_from_url(url, output_dir):
+    """
+    Download audio from a URL into output_dir.
+    Supports YouTube/SoundCloud/etc via yt-dlp, and plain audio URLs via urllib.
+    Returns the path to the downloaded file, or None on failure.
+    """
+    url = url.strip()
+    is_site = any(x in url for x in ('youtube.com', 'youtu.be', 'soundcloud.com',
+                                      'music.apple.com', 'open.spotify.com'))
+    if is_site:
+        try:
+            import yt_dlp
+        except ImportError:
+            st.error("yt-dlp is not installed. Run: `pip install yt-dlp`")
+            return None
+        dest_tmpl = os.path.join(output_dir, 'downloaded.%(ext)s')
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': dest_tmpl,
+            'quiet': True,
+            'no_warnings': True,
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'wav'}],
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            downloaded = os.path.join(output_dir, 'downloaded.wav')
+            if os.path.exists(downloaded):
+                return downloaded
+            # yt-dlp may keep original extension; find what was saved
+            for f in os.listdir(output_dir):
+                if f.startswith('downloaded.'):
+                    return os.path.join(output_dir, f)
+            st.error("Download appeared to succeed but output file not found.")
+            return None
+        except Exception as e:
+            st.error(f"Download failed: {e}")
+            return None
+    else:
+        # Plain audio URL — download with urllib
+        try:
+            suffix = url.split('?')[0].rsplit('.', 1)[-1].lower()
+            if suffix not in ('mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'):
+                suffix = 'mp3'
+            dest = os.path.join(output_dir, f'downloaded.{suffix}')
+            urllib.request.urlretrieve(url, dest)
+            return dest
+        except Exception as e:
+            st.error(f"Download failed: {e}")
+            return None
+
+
+# ── Helper: ffmpeg center-channel vocal removal (fallback) ────────────────────
+def _ffmpeg_vocal_remove(input_path, output_dir):
+    """
+    Remove centered vocals via stereo phase cancellation (L − R).
+    Works only on stereo files where vocals are panned to center.
+    Quality is limited — use as a fallback only.
+    """
+    out = os.path.join(output_dir, 'instrumental_basic.wav')
+    cmd = [
+        'ffmpeg', '-i', input_path,
+        '-af', 'pan=stereo|c0=c0-c1|c1=c1-c0',
+        '-y', out
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        st.error(f"Fallback vocal removal failed: {r.stderr}")
+        return None
+    return out
+
+
+# ── Helper: AI source separation ──────────────────────────────────────────────
+def extract_instrumental(input_path, output_dir):
+    """
+    Separate vocals from the instrumental using audio-separator (ONNX/MDX-Net).
+    Falls back to ffmpeg center-channel cancellation if the package is missing.
+
+    Returns (instrumental_wav_path, method_description) or (None, ...) on failure.
+    """
+    try:
+        from audio_separator.separator import Separator
+    except ImportError:
+        st.warning(
+            "⚠️ `audio-separator` is not installed — using basic ffmpeg vocal removal "
+            "(lower quality, works best on stereo recordings with centered vocals). "
+            "Install with: `pip install audio-separator[cpu]`"
+        )
+        result = _ffmpeg_vocal_remove(input_path, output_dir)
+        return result, "ffmpeg center-channel cancellation (fallback)"
+
+    model = 'UVR-MDX-NET-Inst_HQ_3.onnx'
+    st.write(f"🔄 Loading separation model (`{model}`) — first run downloads ~60 MB…")
+    try:
+        separator = Separator(
+            output_dir=output_dir,
+            log_level=logging.WARNING,
+        )
+        separator.load_model(model_filename=model)
+    except Exception as e:
+        st.warning(f"Model load failed ({e}); falling back to basic vocal removal.")
+        result = _ffmpeg_vocal_remove(input_path, output_dir)
+        return result, "ffmpeg center-channel cancellation (fallback)"
+
+    st.write("🔄 Separating vocals from instrumental — this may take 1–3 minutes on CPU…")
+    try:
+        output_files = separator.separate(input_path)
+    except Exception as e:
+        st.warning(f"Separation failed ({e}); falling back to basic vocal removal.")
+        result = _ffmpeg_vocal_remove(input_path, output_dir)
+        return result, "ffmpeg center-channel cancellation (fallback)"
+
+    # Identify the instrumental output (not the vocals stem)
+    instrumental = None
+    for f in output_files:
+        name = os.path.basename(f)
+        if 'Instrumental' in name or 'No Vocals' in name or 'No_Vocals' in name:
+            instrumental = f
+            break
+    if instrumental is None:
+        # Avoid picking the pure-vocals file; take whatever isn't labelled Vocals-only
+        for f in output_files:
+            name = os.path.basename(f)
+            if 'Vocals' not in name:
+                instrumental = f
+                break
+    if instrumental is None and output_files:
+        instrumental = output_files[0]  # last resort
+
+    if instrumental and os.path.exists(instrumental):
+        return instrumental, f"AI source separation ({model})"
+
+    st.error("Separation produced no usable output file.")
+    return None, "failed"
+
 
 # ── Helper: download buttons ──────────────────────────────────────────────────
 def create_download_buttons(wav_path, output_stem, temp_dir, key_suffix=""):
@@ -371,10 +511,14 @@ def optimize_audio(input_path, output_dir, stage_prefix="opt"):
     return final_wav, stages_info
 
 
-# ── Session-state defaults for auto-sync offset widgets ──────────────────────
+# ── Session-state defaults ────────────────────────────────────────────────────
 for _key in ('vocal_offset_widget', 'accomp_offset_widget'):
     if _key not in st.session_state:
         st.session_state[_key] = 0.0
+
+for _key in ('extracted_accomp_bytes', 'extracted_accomp_name', 'extracted_accomp_method'):
+    if _key not in st.session_state:
+        st.session_state[_key] = None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Tabs
@@ -392,21 +536,27 @@ with tab_mix:
         st.markdown("""
 **What you need**
 - A **dry vocal** recording — your voice only, no background music (WAV, MP3, or M4A).
-- An **accompaniment** track — the instrumental / backing track for the same song.
+- An **accompaniment** track — either a ready-made backing track, **or** an original song the app can strip the vocals from for you.
 
 **Step-by-step**
 
 | Step | What to do |
 |------|-----------|
-| **1 — Upload** | Drop both files into the upload boxes below. |
-| **2 — Auto-detect sync** | Click **🔍 Auto-detect sync** to automatically find and set the time offset. Fine-tune manually if needed. |
+| **1a — Vocal** | Upload your dry vocal recording. |
+| **1b — Accompaniment** | Either **upload a backing track** directly, or choose **"Extract from original song"** to have the app remove the vocals from a full song (upload the song file or paste a YouTube/audio URL). |
+| **2 — Auto-detect sync** | Click **🔍 Auto-detect sync** to set the time offset automatically. Fine-tune manually if needed. |
 | **3 — Volume balance** | Keep vocal at 100%. Lower the accompaniment to ~80% so your voice sits on top. |
 | **4 — Optimization** _(optional)_ | Check the box to apply EQ + loudness normalization. Pick a vocal profile in the sidebar. |
 | **5 — Mix & Export** | Click **▶️ Mix & Export** and download the result as WAV or MP3. |
 
+**Extracting accompaniment from an original song**
+- The app uses an AI model (MDX-Net via ONNX) to separate vocals from music. The first run downloads a ~60 MB model file.
+- Processing takes 1–3 minutes on CPU for a typical 3–5 minute song.
+- If the AI model is unavailable, the app falls back to a simpler ffmpeg method (lower quality; works best on stereo recordings with centered vocals).
+- For best results, provide a high-quality stereo source file.
+
 **Time sync explained**
-- Both recordings must have started at the same point in the song.
-- If your vocal file has several seconds of silence at the start (you waited before singing), **Auto-detect sync** will find that gap and delay the accompaniment to match — so the first note of your voice lines up with the right beat in the music.
+- If your vocal file has several seconds of silence at the start (you waited before singing), **Auto-detect sync** will find that gap and delay the accompaniment to match.
 - You can also set offsets manually: use **Vocal start offset** to delay the vocal, or **Accompaniment start offset** to delay the music.
 
 **🔒 Privacy & file handling**
@@ -427,14 +577,107 @@ Temporary files created during processing are deleted automatically the moment p
         )
     with col_a:
         st.markdown("**🎸 Accompaniment Track**")
-        accomp_file = st.file_uploader(
-            "Upload backing / music track",
-            type=["wav", "mp3", "m4a"],
-            key="accomp_upload",
-            help="The instrumental or backing track that accompanies the vocal"
+        accomp_source = st.radio(
+            "How to provide the accompaniment:",
+            ["Upload file directly", "Extract from original song"],
+            key="accomp_source_radio",
+            help="Upload a ready-made backing track, or let the app strip the vocals from an original recording."
         )
 
-    both_uploaded = vocal_file is not None and accomp_file is not None
+        if accomp_source == "Upload file directly":
+            # Clear any extracted file when switching back to direct upload
+            st.session_state['extracted_accomp_bytes'] = None
+            st.session_state['extracted_accomp_name'] = None
+            st.session_state['extracted_accomp_method'] = None
+            accomp_file = st.file_uploader(
+                "Upload backing / music track",
+                type=["wav", "mp3", "m4a"],
+                key="accomp_upload",
+                help="The instrumental or backing track that accompanies the vocal"
+            )
+        else:
+            accomp_file = None  # will use extracted bytes from session state
+
+            st.markdown("**Provide the original song:**")
+            song_src = st.radio(
+                "Source",
+                ["Upload audio file", "Paste a URL"],
+                key="song_src_radio",
+                horizontal=True,
+            )
+
+            orig_song_file = None
+            song_url = ""
+
+            if song_src == "Upload audio file":
+                orig_song_file = st.file_uploader(
+                    "Upload original song (vocals will be removed)",
+                    type=["wav", "mp3", "m4a"],
+                    key="orig_song_upload",
+                    help="The full song you want to strip vocals from"
+                )
+            else:
+                song_url = st.text_input(
+                    "URL",
+                    placeholder="YouTube link or direct audio URL",
+                    key="song_url_input",
+                    help="YouTube, SoundCloud, or a direct .mp3/.wav link"
+                )
+
+            extract_ready = orig_song_file is not None or len(song_url.strip()) > 0
+            if st.button(
+                "🎸 Extract Accompaniment",
+                key="extract_btn",
+                disabled=not extract_ready,
+                help="Remove vocals from the song and use the instrumental as the accompaniment track"
+            ):
+                with tempfile.TemporaryDirectory() as _td:
+                    orig_path = None
+                    song_name = "song"
+
+                    if orig_song_file:
+                        orig_path = os.path.join(_td, orig_song_file.name)
+                        with open(orig_path, 'wb') as _f:
+                            _f.write(orig_song_file.getbuffer())
+                        song_name = Path(orig_song_file.name).stem
+                    else:
+                        with st.spinner("Downloading audio…"):
+                            orig_path = download_audio_from_url(song_url.strip(), _td)
+                        if orig_path:
+                            song_name = "downloaded"
+
+                    if orig_path:
+                        with st.spinner("Extracting instrumental — may take a few minutes…"):
+                            instrumental, method = extract_instrumental(orig_path, _td)
+
+                        if instrumental and os.path.exists(instrumental):
+                            with open(instrumental, 'rb') as _f:
+                                st.session_state['extracted_accomp_bytes']  = _f.read()
+                            st.session_state['extracted_accomp_name']   = f"{song_name}_instrumental.wav"
+                            st.session_state['extracted_accomp_method'] = method
+                            st.rerun()
+                        else:
+                            st.error("❌ Extraction failed. See messages above.")
+
+            # Show extraction result (persists across reruns)
+            if st.session_state['extracted_accomp_bytes'] is not None:
+                st.success(f"✅ Ready: **{st.session_state['extracted_accomp_name']}**")
+                st.caption(f"Method: {st.session_state['extracted_accomp_method']}")
+                if st.button("✕ Clear & re-extract", key="clear_accomp"):
+                    st.session_state['extracted_accomp_bytes']  = None
+                    st.session_state['extracted_accomp_name']   = None
+                    st.session_state['extracted_accomp_method'] = None
+                    st.rerun()
+            else:
+                st.info("Click **🎸 Extract Accompaniment** above after providing the song.")
+
+    # Determine whether accompaniment is ready (either source)
+    accomp_ready = (
+        (accomp_source == "Upload file directly" and accomp_file is not None) or
+        (accomp_source == "Extract from original song" and
+         st.session_state['extracted_accomp_bytes'] is not None)
+    )
+    both_uploaded = vocal_file is not None and accomp_ready
 
     # ── Step 2: Sync & Balance ────────────────────────────────────────────────
     st.subheader("Step 2 — Sync & Balance")
@@ -563,12 +806,19 @@ Temporary files created during processing are deleted automatically the moment p
 
     if mix_button and both_uploaded:
         with tempfile.TemporaryDirectory() as temp_dir:
-            vocal_path  = os.path.join(temp_dir, vocal_file.name)
-            accomp_path = os.path.join(temp_dir, accomp_file.name)
-            with open(vocal_path,  'wb') as f:
+            vocal_path = os.path.join(temp_dir, vocal_file.name)
+            with open(vocal_path, 'wb') as f:
                 f.write(vocal_file.getbuffer())
-            with open(accomp_path, 'wb') as f:
-                f.write(accomp_file.getbuffer())
+
+            # Accompaniment: direct upload or extracted from original song
+            if accomp_file is not None:
+                accomp_path = os.path.join(temp_dir, accomp_file.name)
+                with open(accomp_path, 'wb') as f:
+                    f.write(accomp_file.getbuffer())
+            else:
+                accomp_path = os.path.join(temp_dir, st.session_state['extracted_accomp_name'])
+                with open(accomp_path, 'wb') as f:
+                    f.write(st.session_state['extracted_accomp_bytes'])
 
             st.info("⏳ Processing audio…")
             start_time = time.time()
