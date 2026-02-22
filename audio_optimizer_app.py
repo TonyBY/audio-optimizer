@@ -663,6 +663,14 @@ Temporary files created during processing are deleted automatically the moment p
             if st.session_state['extracted_accomp_bytes'] is not None:
                 st.success(f"✅ Ready: **{st.session_state['extracted_accomp_name']}**")
                 st.caption(f"Method: {st.session_state['extracted_accomp_method']}")
+                st.download_button(
+                    label="⬇️ Download Instrumental (WAV)",
+                    data=st.session_state['extracted_accomp_bytes'],
+                    file_name=st.session_state['extracted_accomp_name'],
+                    mime="audio/wav",
+                    use_container_width=True,
+                    key="dl_instrumental"
+                )
                 if st.button("✕ Clear & re-extract", key="clear_accomp"):
                     st.session_state['extracted_accomp_bytes']  = None
                     st.session_state['extracted_accomp_name']   = None
