@@ -1,10 +1,11 @@
-# 🎤 Audio Optimizer App
+# 🎙️ VocalForge
 
-A browser-based audio tool that lets you:
+A browser-based tool that turns your home vocal recording into a polished track:
 
-1. **Mix** a dry vocal recording with an accompaniment (backing) track — with sync control and volume balance.
-2. **Optimize** any audio file with professional-quality EQ, compression, and loudness normalization.
-3. **Download** the result as lossless WAV and/or 320 kbps MP3.
+1. **Extract** the instrumental from any song — upload a full song or paste a URL and the app strips the vocals out.
+2. **Mix** your dry vocal with the accompaniment — with auto-sync and volume balance.
+3. **Optimize** the result with professional-quality EQ, compression, and loudness normalization.
+4. **Download** as lossless WAV and/or 320 kbps MP3.
 
 Built with [Streamlit](https://streamlit.io) and [ffmpeg](https://ffmpeg.org) — no plugins, no subscriptions, runs entirely on your machine.
 
@@ -314,4 +315,4 @@ Open source — feel free to modify and share!
 
 ---
 
-Built with ❤️ using Streamlit and ffmpeg
+Built with ❤️ using Streamlit and ffmpeg · **VocalForge**

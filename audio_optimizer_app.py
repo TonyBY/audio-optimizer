@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Audio Optimizer App
-Web UI for vocal audio mixing and enhancement using ffmpeg.
+VocalForge
+Extract instrumentals from any song, mix your vocal, and enhance the result.
 
 Features:
-  - Mix a dry vocal with an accompaniment track (sync + volume balance)
+  - Extract accompaniment by removing vocals from an original song (AI or ffmpeg)
+  - Download the extracted instrumental independently
+  - Mix a dry vocal with an accompaniment track (auto-sync + volume balance)
   - Optionally enhance the mix with EQ, compression, and loudness normalization
   - Standalone optimization of any single audio file
 """
@@ -21,15 +23,15 @@ import logging
 import urllib.request
 
 st.set_page_config(
-    page_title="Audio Optimizer",
-    page_icon="🎤",
+    page_title="VocalForge",
+    page_icon="🎙️",
     layout="wide"
 )
 
-st.title("🎤 Audio Optimizer")
+st.title("🎙️ VocalForge")
 st.markdown(
-    "Mix a dry vocal with an accompaniment track, then enhance with professional-quality "
-    "EQ, compression, and loudness normalization — or optimize any single audio file."
+    "Extract the instrumental from any song · Mix your vocal · Enhance the result. "
+    "Everything you need to turn a home recording into a polished track."
 )
 
 # ── ffmpeg check ──────────────────────────────────────────────────────────────
@@ -995,4 +997,4 @@ Temporary files created during processing are deleted automatically the moment p
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption("🎤 Audio Optimizer · Powered by ffmpeg · Built with Streamlit")
+st.caption("🎙️ VocalForge · Powered by ffmpeg · Built with Streamlit")
