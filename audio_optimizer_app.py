@@ -388,6 +388,32 @@ with tab_mix:
         "set sync offsets & volume balance → mix → optionally enhance the result."
     )
 
+    with st.expander("📖 How to Use This Tab — Read Me First", expanded=True):
+        st.markdown("""
+**What you need**
+- A **dry vocal** recording — your voice only, no background music (WAV, MP3, or M4A).
+- An **accompaniment** track — the instrumental / backing track for the same song.
+
+**Step-by-step**
+
+| Step | What to do |
+|------|-----------|
+| **1 — Upload** | Drop both files into the upload boxes below. |
+| **2 — Auto-detect sync** | Click **🔍 Auto-detect sync** to automatically find and set the time offset. Fine-tune manually if needed. |
+| **3 — Volume balance** | Keep vocal at 100%. Lower the accompaniment to ~80% so your voice sits on top. |
+| **4 — Optimization** _(optional)_ | Check the box to apply EQ + loudness normalization. Pick a vocal profile in the sidebar. |
+| **5 — Mix & Export** | Click **▶️ Mix & Export** and download the result as WAV or MP3. |
+
+**Time sync explained**
+- Both recordings must have started at the same point in the song.
+- If your vocal file has several seconds of silence at the start (you waited before singing), **Auto-detect sync** will find that gap and delay the accompaniment to match — so the first note of your voice lines up with the right beat in the music.
+- You can also set offsets manually: use **Vocal start offset** to delay the vocal, or **Accompaniment start offset** to delay the music.
+
+**🔒 Privacy & file handling**
+Your files are never stored on the server. Uploads stay in memory for your session only.
+Temporary files created during processing are deleted automatically the moment processing finishes.
+""")
+
     # ── Step 1: Upload ────────────────────────────────────────────────────────
     st.subheader("Step 1 — Upload Your Tracks")
     col_v, col_a = st.columns(2)
@@ -579,25 +605,6 @@ with tab_mix:
 
                 st.success("🎉 Your mixed audio is ready — click a download button above.")
 
-    with st.expander("ℹ️ How Mixing Works"):
-        st.markdown("""
-**Time Synchronization**
-- Set **Vocal start offset** when the accompaniment begins before the singing
-  _(e.g., the music plays for 4 seconds before you start singing → set vocal offset to 4.0)_
-- Set **Accompaniment start offset** when the vocal begins before the music
-  _(e.g., you start singing 2 seconds before the music kicks in → set accomp offset to 2.0)_
-- Only one offset should be non-zero for a typical use case.
-
-**Volume Balance**
-- **Vocal volume 100%** — keeps the vocal at its original level.
-- **Accompaniment volume 70–85%** — a common starting point so the vocal sits clearly on top.
-- Values above 100% amplify beyond the original recording level (may clip if too high).
-
-**Optional Optimization**
-- Applies EQ, compression, and loudness normalization to the finished mix.
-- Configure vocal profile and target loudness in the **sidebar** before clicking Mix.
-- Best used when the vocal track alone needs enhancement (not always needed for a mix).
-""")
 
 
 # ── Tab 2: Optimize Only ──────────────────────────────────────────────────────
@@ -607,6 +614,39 @@ with tab_opt:
         "and loudness normalization. Configure settings in the sidebar."
     )
 
+    with st.expander("📖 How to Use This Tab — Read Me First", expanded=True):
+        st.markdown("""
+**What you need**
+- Any audio file you want to enhance — a vocal recording, a finished mix, a podcast, etc. (WAV, MP3, or M4A).
+
+**Step-by-step**
+
+| Step | What to do |
+|------|-----------|
+| **1 — Sidebar settings** | Choose a **Vocal Profile** that matches the voice type, set **Target Loudness**, and pick a **Reverb** amount. |
+| **2 — Upload** | Drop your audio file into the upload box below. |
+| **3 — Process** | Click **▶️ Start Processing** and wait a few seconds. |
+| **4 — Download** | Download the result as WAV (lossless) or MP3 (320 kbps). |
+
+**Vocal profiles**
+
+| Profile | Best for | Key EQ moves |
+|---------|----------|-------------|
+| **Low Baritone** | Deep male voice | −3 dB @ 250 Hz, +2 dB @ 3 kHz |
+| **Tenor** | Higher male voice | −2 dB @ 300 Hz, +2.5 dB @ 3.5 kHz |
+| **Female** | Female voice | −2 dB @ 350 Hz, +2 dB @ 4 kHz |
+| **Spoken** | Podcast, narration | −3 dB @ 200 Hz, +3 dB @ 2.5 kHz |
+
+**Target loudness**
+- **−14 LUFS** — Spotify, Apple Music, YouTube _(default)_
+- **−16 LUFS** — Podcast standard
+- **−23 LUFS** — Broadcast standard (Europe)
+
+**🔒 Privacy & file handling**
+Your files are never stored on the server. Uploads stay in memory for your session only.
+Temporary files created during processing are deleted automatically the moment processing finishes.
+""")
+
     st.header("📁 Upload Audio File")
     uploaded_file = st.file_uploader(
         "Choose an audio file (WAV, MP3, M4A)",
@@ -615,7 +655,7 @@ with tab_opt:
         help="Upload the vocal or audio recording you want to enhance"
     )
 
-    with st.expander("ℹ️ EQ Curves by Vocal Profile"):
+    with st.expander("ℹ️ Full EQ Curve Details"):
         st.markdown("""
 **Low Baritone** _(deep male voice, warm and full)_
 - Reduce mud @ 250 Hz (−3 dB)  ·  Presence boost @ 3 kHz (+2 dB)
